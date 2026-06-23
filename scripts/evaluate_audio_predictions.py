@@ -6,7 +6,85 @@ ARTS=['Clipping','Hiss','Buzz','Pops','Unnatural Prosody']
 BASE={'sample_id','media_path','modality','track_id','label'}
 TF_RE=re.compile(r'\b(true|false)\b',re.I); MC_RE=re.compile(r'\b([A-E])\b',re.I)
 LINE_RE=re.compile(r'^\s*[\-*]?\s*`?\"?\s*([^:\n\r]+?)\s*\"?`?\s*:\s*\"?\s*(true|false|yes|no|0|1)\s*\"?\s*,?\s*$',re.I)
-PROMPT='''You are an audio deepfake artifact mapping evaluator. Read Analysis Text and output only five lines: Artifact: True/False. Mark True only when explicitly supported; absent/uncertain/possible means False.\n\nAnalysis Text:\n{RESPONSE}\n\nDefinitions:\nClipping: harsh, fuzzy, or crackling sound when audio is too loud.\nHiss: high-frequency static noise, shhhh sound.\nBuzz: low-frequency tone, electrical interference.\nPops: abrupt, short, sharp sounds.\nUnnatural Prosody: robotic, monotonous, or flat speech.\n\nOutput:\nClipping: True/False\nHiss: True/False\nBuzz: True/False\nPops: True/False\nUnnatural Prosody: True/False'''
+MAPPING_PROMPT = """
+You are an AI evaluation engine. Your task is to process an analysis of a digital media sample (`Analysis Text`) and determine which artifacts from a predefined list (`Artifact Definitions`) are present.
+
+Your evaluation must be based **strictly** on the definitions provided.
+
+Your output must be a simple key-value checklist suitable for automated parsing. Use "True" or "False". Do not include any justifications, explanations, or any text other than the artifact name and its corresponding boolean value.
+
+---
+
+# **1. Analysis Text**
+
+{RESPONSE}
+
+---
+
+# **2. Artifact Definitions**
+
+You must check for the presence of the following artifacts. An artifact is "True" **only if** the `Analysis Text` provides evidence that matches its specific `Definition`.
+
+* **Blurriness**
+    * **Definition**: ["The loss of sharpness and fine detail, making the image appear out of focus."]
+* **Blockiness**
+    * **Definition**: ["Visible square or rectangular patterns on the screen."]
+* **Noise**
+    * **Definition**: ["Random, fine speckles or a sandy texture across the image."]
+* **Banding**
+    * **Definition**: ["Distinct, abrupt steps or bands in areas that should have a smooth color gradient, like a sunset or a clear sky."]
+* **Color Inconsistency**
+    * **Definition**: ["Colors appear unnatural, with excessive saturation or vibrancy that makes the sample look too intense or unrealistic."]
+* **Blending Artifacts**
+    * **Definition**: ["Visible boundaries where elements should merge smoothly."]
+* **Lighting Inconsistency**
+    * **Definition**: ["Illumination that does not agree across the scene."]
+* **Unnatural Texture**
+    * **Definition**: ["The surface is overly smooth, missing the natural irregularities and tactile cues of real materials."]
+* **Temporal Artifacts**
+    * **Definition**: ["Inconsistencies across frames that break motion continuity."]
+* **Flicker**
+    * **Definition**: ["Noticeable and often rapid variation in the overall brightness of the video."]
+* **Clipping**
+    * **Definition**: ["A harsh, fuzzy, or crackling sound that occurs when the audio is too loud for the system to handle."]
+* **Hiss**
+    * **Definition**: ["High-frequency static noise, often described as a shhhh sound."]
+* **Buzz**
+    * **Definition**: ["Low-frequency tone, typically caused by electrical interference."]
+* **Pops**
+    * **Definition**: ["Abrupt, short, and sharp sounds that interrupt the audio."]
+* **Reflection Inconsistency**
+    * **Definition**: ["Reflections do not match the subject, lighting, or scene geometry."]
+* **Shadow Inconsistency**
+    * **Definition**: ["Shadows do not match the subject, lighting, or scene geometry."]
+* **Spatial & Contact Incoherence**
+    * **Definition**: ["Objects or people fail to make contact with surfaces or each other."]
+* **Unrealistic Background**
+    * **Definition**: ["Background lacks plausible detail, perspective, or depth."]
+* **Anatomical Inconsistency**
+    * **Definition**: ["Human anatomy is implausible."]
+* **Unnatural Expressions**
+    * **Definition**: ["Facial expressions do not align with emotion or context or appears unrealistic."]
+* **Unnatural Gaze or Blinking**
+    * **Definition**: ["Eye direction or blink behavior appears robotic."]
+* **Unnatural Body or Head Movement**
+    * **Definition**: ["Motion lacks physical plausibility."]
+* **Object Integrity Flaws**
+    * **Definition**: ["The object is incomplete, broken, or internally inconsistent."]
+* **Unrecognizable Text**
+    * **Definition**: ["The text is unrecognizable, incomplete, broken, or distorted."]
+* **Unnatural Prosody**
+    * **Definition**: ["Speech often sounds robotic, monotonous, or flat, lacking natural intonation."]
+* **Audio-Visual Desynchronization**
+    * **Definition**: ["A mismatch between spoken audio and visible mouth movements or facial actions."]
+* **Emotional Contradiction**
+    * **Definition**: ["The face, voice, or body language conveys a different emotion than the content."]
+
+---
+
+# **Begin Evaluation**
+"""
+PROMPT = MAPPING_PROMPT
 
 def b(x):
     if isinstance(x,bool): return x
@@ -204,7 +282,7 @@ def calc_tcs(tasks):
     return [{'modality':'audio','acc_det':acc,'acc_tfq':tfqv,'score_mcq':mcqv,'typea_f_0_5':ta,'typeb_f_0_5':tb,'f_0_5':f,'tcs':val,'complete':complete}]
 
 def main():
-    ap=argparse.ArgumentParser(); ap.add_argument('--task',default='all',choices=['all','tfq','mcq','typea_oeq','typeb_oeq']); ap.add_argument('--split',default='public_val'); ap.add_argument('--data-root',type=Path,required=True); ap.add_argument('--predictions-root',type=Path,required=True); ap.add_argument('--model',required=True); ap.add_argument('--qwen-model',default='Qwen/Qwen3.5-4B'); ap.add_argument('--analysis-field',default='response',choices=['response','analysis_text','auto']); ap.add_argument('--device-map',default='auto'); ap.add_argument('--torch-dtype',default='auto'); ap.add_argument('--max-new-tokens',type=int,default=256); ap.add_argument('--cache-dir'); ap.add_argument('--mapping-root',type=Path); ap.add_argument('--summary-out',type=Path); ap.add_argument('--skip-existing-mapping',action='store_true'); ap.add_argument('--overwrite-mapping',action='store_true'); args=ap.parse_args()
+    ap=argparse.ArgumentParser(); ap.add_argument('--task',default='all',choices=['all','tfq','mcq','typea_oeq','typeb_oeq']); ap.add_argument('--split',default='public_val'); ap.add_argument('--data-root',type=Path,required=True); ap.add_argument('--predictions-root',type=Path,required=True); ap.add_argument('--model',required=True); ap.add_argument('--qwen-model',default='Qwen/Qwen3.5-4B'); ap.add_argument('--analysis-field',default='response',choices=['response','analysis_text','auto']); ap.add_argument('--device-map',default='auto'); ap.add_argument('--torch-dtype',default='auto'); ap.add_argument('--max-new-tokens',type=int,default=512); ap.add_argument('--cache-dir'); ap.add_argument('--mapping-root',type=Path); ap.add_argument('--summary-out',type=Path); ap.add_argument('--skip-existing-mapping',action='store_true'); ap.add_argument('--overwrite-mapping',action='store_true'); args=ap.parse_args()
     ts=['tfq','mcq','typea_oeq','typeb_oeq'] if args.task=='all' else [args.task]; raw={}; comps=[]
     for t in ts:
         pd=pdir(args.predictions_root,t,args.model,args.split)
