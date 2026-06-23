@@ -2,10 +2,50 @@ from __future__ import annotations
 import argparse,csv,json,re,sys,time
 from pathlib import Path
 
-ARTS=['Clipping','Hiss','Buzz','Pops','Unnatural Prosody']
+AUDIO_ARTS=['Clipping','Hiss','Buzz','Pops','Unnatural Prosody']
+ALL_ARTS=[
+    'Blurriness','Blockiness','Noise','Banding','Color Inconsistency','Blending Artifacts',
+    'Lighting Inconsistency','Unnatural Texture','Temporal Artifacts','Flicker',
+    'Clipping','Hiss','Buzz','Pops',
+    'Reflection Inconsistency','Shadow Inconsistency','Spatial & Contact Incoherence',
+    'Unrealistic Background','Anatomical Inconsistency','Unnatural Expressions',
+    'Unnatural Gaze or Blinking','Unnatural Body or Head Movement','Object Integrity Flaws',
+    'Unrecognizable Text','Unnatural Prosody','Audio-Visual Desynchronization',
+    'Emotional Contradiction'
+]
+ARTS=AUDIO_ARTS
 BASE={'sample_id','media_path','modality','track_id','label'}
 TF_RE=re.compile(r'\b(true|false)\b',re.I); MC_RE=re.compile(r'\b([A-E])\b',re.I)
 LINE_RE=re.compile(r'^\s*[\-*]?\s*`?\"?\s*([^:\n\r]+?)\s*\"?`?\s*:\s*\"?\s*(true|false|yes|no|0|1)\s*\"?\s*,?\s*$',re.I)
+MAPPING_OUTPUT_TEMPLATE='''
+Blurriness: True/False
+Blockiness: True/False
+Noise: True/False
+Banding: True/False
+Color Inconsistency: True/False
+Blending Artifacts: True/False
+Lighting Inconsistency: True/False
+Unnatural Texture: True/False
+Temporal Artifacts: True/False
+Flicker: True/False
+Clipping: True/False
+Hiss: True/False
+Buzz: True/False
+Pops: True/False
+Reflection Inconsistency: True/False
+Shadow Inconsistency: True/False
+Spatial & Contact Incoherence: True/False
+Unrealistic Background: True/False
+Anatomical Inconsistency: True/False
+Unnatural Expressions: True/False
+Unnatural Gaze or Blinking: True/False
+Unnatural Body or Head Movement: True/False
+Object Integrity Flaws: True/False
+Unrecognizable Text: True/False
+Unnatural Prosody: True/False
+Audio-Visual Desynchronization: True/False
+Emotional Contradiction: True/False
+'''.strip()
 MAPPING_PROMPT = """
 You are an AI evaluation engine. Your task is to process an analysis of a digital media sample (`Analysis Text`) and determine which artifacts from a predefined list (`Artifact Definitions`) are present.
 
@@ -83,6 +123,10 @@ You must check for the presence of the following artifacts. An artifact is "True
 ---
 
 # **Begin Evaluation**
+
+Return exactly the following checklist format. Replace each "True/False" with either "True" or "False":
+
+{OUTPUT_TEMPLATE}
 """
 PROMPT = MAPPING_PROMPT
 
@@ -135,7 +179,8 @@ def label(x):
         break
     return None
 
-def parse_map(text,arts=ARTS):
+def parse_map(text,arts=None):
+    arts=ALL_ARTS if arts is None else arts
     ok={norm(a):a for a in arts}; out={}; text=str(text or '').strip()
     for cand in (text, text[text.find('{'):text.rfind('}')+1] if '{' in text and '}' in text else ''):
         if not cand: continue
@@ -172,7 +217,7 @@ def oeq_answers(root,split):
     p=root/'OEQ'/split/'answers_audio.csv'; ans={}
     if not p.exists(): return ans
     with p.open(newline='',encoding='utf-8') as f:
-        rd=csv.DictReader(f); arts=[x for x in (rd.fieldnames or []) if x not in BASE] or ARTS
+        rd=csv.DictReader(f); arts=[x for x in (rd.fieldnames or []) if x not in BASE] or AUDIO_ARTS
         for r in rd:
             if r.get('sample_id'):
                 ans[r['sample_id']]={'label':str(r.get('label') or '').lower(),'arts':arts,'gt':{a:bool(b(r.get(a))) for a in arts}}
@@ -194,7 +239,7 @@ class Mapper:
         self.tok=AutoTokenizer.from_pretrained(self.a.qwen_model,trust_remote_code=True,cache_dir=self.a.cache_dir)
         self.mod=AutoModelForCausalLM.from_pretrained(self.a.qwen_model,torch_dtype=dt,device_map=self.a.device_map,trust_remote_code=True,cache_dir=self.a.cache_dir).eval()
     def gen(self,text):
-        self.load(); prompt=PROMPT.format(RESPONSE=text)
+        self.load(); prompt=PROMPT.format(RESPONSE=text,OUTPUT_TEMPLATE=MAPPING_OUTPUT_TEMPLATE)
         msgs=[{'role':'system','content':'Output only the artifact checklist.'},{'role':'user','content':prompt}]
         try: q=self.tok.apply_chat_template(msgs,tokenize=False,add_generation_prompt=True)
         except Exception: q=prompt
@@ -223,7 +268,7 @@ def map_oeq(inp,out,args,task):
         st=time.time(); err=None
         try: resp=mp.gen(tx)
         except Exception as e: err=str(e); resp=f'[ERROR] {e}'
-        obj={'model_id':args.qwen_model,'sample':{'sample_id':k,'task':task,'modality':'audio','media_meta':{'analysis_text':tx}},'response':resp,'parsed_artifact_map':parse_map(resp),'latency_ms':(time.time()-st)*1000}
+        obj={'model_id':args.qwen_model,'sample':{'sample_id':k,'task':task,'modality':'audio','media_meta':{'analysis_text':tx}},'response':resp,'parsed_artifact_map':parse_map(resp,ALL_ARTS),'latency_ms':(time.time()-st)*1000}
         if err: obj['error']=err
         op.write_text(json.dumps(obj,ensure_ascii=False,indent=2)+'\n',encoding='utf-8')
 
@@ -259,7 +304,7 @@ def score_art(mp,ans,task):
     for r in allrecs(mp):
         k=sid(r)
         if not k or k in seen or k not in ans: continue
-        seen.add(k); a=ans[k]; arts=a['arts']; gt=a['gt']; pm=r.get('parsed_artifact_map') if isinstance(r.get('parsed_artifact_map'),dict) else parse_map(str(r.get('response') or ''),arts)
+        seen.add(k); a=ans[k]; arts=a['arts']; gt=a['gt']; pm=r.get('parsed_artifact_map') if isinstance(r.get('parsed_artifact_map'),dict) else parse_map(str(r.get('response') or ''),ALL_ARTS)
         gc=sum(1 for x in arts if gt.get(x)); pc=sum(1 for x in arts if pm.get(x)); mt=sum(1 for x in arts if gt.get(x) and pm.get(x))
         if gc<=0: continue
         m+=1; c=mt/gc; ch=1.0 if pc==0 else 1-mt/pc; pr=1-ch; den=.25*pr+c; f=1.25*pr*c/den if den>0 else 0
