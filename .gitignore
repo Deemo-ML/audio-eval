@@ -1,0 +1,10 @@
+__pycache__/
+*.py[cod]
+*.log
+.env
+.venv/
+venv/
+outputs/
+evaluation_results/
+oeq_mappings/
+.DS_Store
