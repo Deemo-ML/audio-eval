@@ -6,7 +6,44 @@ ARTS=['Clipping','Hiss','Buzz','Pops','Unnatural Prosody']
 BASE={'sample_id','media_path','modality','track_id','label'}
 TF_RE=re.compile(r'\b(true|false)\b',re.I); MC_RE=re.compile(r'\b([A-E])\b',re.I)
 LINE_RE=re.compile(r'^\s*[\-*]?\s*`?\"?\s*([^:\n\r]+?)\s*\"?`?\s*:\s*\"?\s*(true|false|yes|no|0|1)\s*\"?\s*,?\s*$',re.I)
-PROMPT='''You are an audio deepfake artifact mapping evaluator. Read Analysis Text and output only five lines: Artifact: True/False. Mark True only when explicitly supported; absent/uncertain/possible means False.\n\nAnalysis Text:\n{RESPONSE}\n\nDefinitions:\nClipping: harsh, fuzzy, or crackling sound when audio is too loud.\nHiss: high-frequency static noise, shhhh sound.\nBuzz: low-frequency tone, electrical interference.\nPops: abrupt, short, sharp sounds.\nUnnatural Prosody: robotic, monotonous, or flat speech.\n\nOutput:\nClipping: True/False\nHiss: True/False\nBuzz: True/False\nPops: True/False\nUnnatural Prosody: True/False'''
+PROMPT='''You are an AI evaluation engine. Your task is to process an audio deepfake analysis (`Analysis Text`) and determine which audio artifacts from a predefined list (`Artifact Definitions`) are present.
+
+Your evaluation must be based strictly on the definitions provided.
+
+Your output must be a simple key-value checklist suitable for automated parsing. Use "True" or "False". Do not include any justifications, explanations, or any text other than the artifact name and its corresponding boolean value.
+
+---
+
+# **1. Analysis Text**
+
+{RESPONSE}
+
+---
+
+# **2. Artifact Definitions**
+
+You must check for the presence of the following audio artifacts. An artifact is "True" only if the `Analysis Text` provides explicit evidence that matches its specific `Definition`. If an artifact is absent, uncertain, possible, weakly suggested, or not clearly supported, mark it as "False".
+
+* **Clipping**
+    * **Definition**: ["A harsh, fuzzy, or crackling sound that occurs when the audio is too loud for the system to handle."]
+* **Hiss**
+    * **Definition**: ["High-frequency static noise, often described as a shhhh sound."]
+* **Buzz**
+    * **Definition**: ["Low-frequency tone, typically caused by electrical interference."]
+* **Pops**
+    * **Definition**: ["Abrupt, short, and sharp sounds that interrupt the audio."]
+* **Unnatural Prosody**
+    * **Definition**: ["Speech often sounds robotic, monotonous, or flat, lacking natural intonation."]
+
+---
+
+# **Begin Evaluation**
+
+Clipping: True/False
+Hiss: True/False
+Buzz: True/False
+Pops: True/False
+Unnatural Prosody: True/False'''
 
 def b(x):
     if isinstance(x,bool): return x
